@@ -18,7 +18,6 @@
 This trainer supports model-agonistic model initialization with huggingface
 """
 
-from collections import deque
 import uuid
 from pprint import pprint
 
@@ -55,39 +54,6 @@ from verl.utils.metric import (
 )
 from verl.utils.tracking import ValidationGenerationsLogger
 from recipe.one_step_off_policy.ray_trainer import OneStepOffRayTrainer
-
-
-class GenerationBatchFuture:
-    """
-    Wrapper class for encapsulating batch generation results
-    """
-
-    def __init__(self, epoch, batch, gen_batch_output):
-        """
-        :param epoch: current epoch
-        :param batch: Input batch data
-        :param gen_batch_output: Generated sequences from the main model (DataProtoFuture)
-        """
-        self.epoch = epoch
-        self.batch = batch
-        self.gen_batch_output = gen_batch_output
-
-    def get(self):
-        """
-        Get the actual results by calling get() method on gen_batch_output
-
-        Returns:
-            tuple: (batch, gen_batch_result)
-                - batch: Original input batch data
-                - gen_batch_result: Result from gen_batch_output.get() or gen_batch_output itself
-        """
-        # Call get() method on gen_batch_output if available
-        if hasattr(self.gen_batch_output, "get"):
-            gen_batch_result = self.gen_batch_output.get()
-        else:
-            gen_batch_result = self.gen_batch_output
-
-        return self.epoch, self.batch, gen_batch_result
 
 
 class HalfStepOffRayTrainer(OneStepOffRayTrainer):
@@ -154,8 +120,8 @@ class HalfStepOffRayTrainer(OneStepOffRayTrainer):
             all_gen_outputs.append(gen_output)
 
         # Concatenate all original data parts and all generation outputs
-        collated_original_data = DataProto.cat(all_original_data)
-        collated_gen_outputs = DataProto.cat(all_gen_outputs)
+        collated_original_data = DataProto.concat(all_original_data)
+        collated_gen_outputs = DataProto.concat(all_gen_outputs)
 
         # Repeat the original data to match the number of rollouts per prompt
         num_rollouts_per_prompt = self.config.actor_rollout_ref.rollout.n
@@ -325,7 +291,7 @@ class HalfStepOffRayTrainer(OneStepOffRayTrainer):
             # For the first iteration, this list is empty.
             if straggler_futures:
                 print(f"Waiting for {len(straggler_futures)} stragglers from the previous step to complete...")
-                remaining_results = ray.get([f[0] for f in straggler_futures])
+                remaining_results = [f[0].get() for f in straggler_futures]
                 for i, (future, data) in enumerate(straggler_futures):
                     completed_stragglers.append((data, remaining_results[i]))
                 straggler_futures.clear()
@@ -337,13 +303,13 @@ class HalfStepOffRayTrainer(OneStepOffRayTrainer):
             if current_rollout_futures:
                 print(f"Waiting for {trigger_threshold}/{len(current_rollout_futures)} early-bird rollouts to complete...")
                 while len(completed_early_birds) < trigger_threshold and current_rollout_futures:
-                    ready_refs, _ = ray.wait([f[0] for f in current_rollout_futures], num_returns=1)
+                    ready_refs, _ = ray.wait([f[0].futures[0] for f in current_rollout_futures], num_returns=1)
                     ready_futures_set = set(ready_refs)
                     
                     remaining_futures_for_current_rollout = []
                     for future, data in current_rollout_futures:
-                        if future in ready_futures_set:
-                            gen_output = ray.get(future)
+                        if future.futures[0] in ready_futures_set:
+                            gen_output = future.get()
                             completed_early_birds.append((data, gen_output))
                         else:
                             remaining_futures_for_current_rollout.append((future, data))

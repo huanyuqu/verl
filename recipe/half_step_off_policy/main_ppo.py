@@ -12,10 +12,10 @@ from verl.trainer.ppo.reward import load_reward_manager
 from verl.trainer.ppo.utils import need_reference_policy
 from verl.utils.config import validate_config
 
-from .ray_trainer import OneStepOffRayTrainer
+from .ray_trainer import HalfStepOffRayTrainer
 
 
-@hydra.main(config_path="config", config_name="one_step_off_ppo_trainer", version_base=None)
+@hydra.main(config_path="config", config_name="half_step_off_ppo_trainer", version_base=None)
 def main(config):
     run_ppo(config)
 
@@ -199,7 +199,7 @@ class TaskRunner:
         train_sampler = create_rl_sampler(config.data, train_dataset)
 
         # Initialize the PPO trainer.
-        trainer = OneStepOffRayTrainer(
+        trainer = HalfStepOffRayTrainer(
             config=config,
             tokenizer=tokenizer,
             processor=processor,
